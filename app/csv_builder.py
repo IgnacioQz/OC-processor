@@ -53,7 +53,7 @@ def build_csv(
     Construye y retorna el contenido completo del CSV como string,
     con el header original de Softland en la primera línea.
     """
-    fecha_hoy = datetime.now().strftime(_DATE_FMT)
+    fecha_orden = _fecha_orden(parsed_lines)
     fecha_max = _fecha_maxima(parsed_lines)
 
     lineas_csv = [SOFTLAND_HEADER]
@@ -61,6 +61,7 @@ def build_csv(
     for line in parsed_lines:
         cod_fabrica   = line["cod_fabrica"]
         default_code  = mapeo_odoo.get(cod_fabrica, NOT_FOUND_CODE)
+        default_code  = _limpiar_codigo_interno(default_code)
         cantidad      = line["cantidad"]
         precio_usd    = line["precio_float"]
         fecha_entrega = line["fecha"]
@@ -78,7 +79,7 @@ def build_csv(
 
         fila = _construir_fila(
             orden=orden,
-            fecha_hoy=fecha_hoy,
+            fecha_orden=fecha_orden,
             fecha_entrega=fecha_entrega,
             fecha_max=fecha_max,
             default_code=default_code,
@@ -96,9 +97,29 @@ def build_csv(
     return "\n".join(lineas_csv)
 
 
+def _limpiar_codigo_interno(default_code: str) -> str:
+    """
+    Sustituye el sufijo del código interno de Odoo:
+        termina en 'KIT' → se reemplaza por '000'
+        termina en 'IN'  → se reemplaza por '00'
+    No aplica sobre el código de "no encontrado en Odoo".
+    """
+    if default_code == NOT_FOUND_CODE:
+        return default_code
+    if default_code.endswith("KIT"):
+        cod_limpio = default_code[:-3] + "000"
+        logger.debug(f"Código interno KIT sustituido: {default_code} → {cod_limpio}")
+        return cod_limpio
+    if default_code.endswith("IN"):
+        cod_limpio = default_code[:-2] + "00"
+        logger.debug(f"Código interno IN sustituido: {default_code} → {cod_limpio}")
+        return cod_limpio
+    return default_code
+
+
 def _construir_fila(
     orden: str,
-    fecha_hoy: str,
+    fecha_orden: str,
     fecha_entrega: str,
     fecha_max: str,
     default_code: str,
@@ -116,7 +137,7 @@ def _construir_fila(
         f"{Config.SOFTLAND_COD_BODEGA},"
         f"{equi},"
         f","
-        f"{fecha_hoy},"
+        f"{fecha_orden},"
         f"{fecha_entrega},"
         f"{c*3}"
         f"{default_code.rstrip()},"
@@ -133,6 +154,18 @@ def _construir_fila(
         f"1"
     )
     return fila
+
+
+def _fecha_orden(parsed_lines: list[dict]) -> str:
+    """
+    Fecha de pedido extraída del encabezado del PDF (campo "Fecha de Pedido").
+    Si el PDF no la trae (formato heredado), usa la fecha de hoy como antes.
+    """
+    for line in parsed_lines:
+        fecha_pedido = line.get("fecha_pedido", "")
+        if fecha_pedido:
+            return fecha_pedido
+    return datetime.now().strftime(_DATE_FMT)
 
 
 def _fecha_maxima(parsed_lines: list[dict]) -> str:

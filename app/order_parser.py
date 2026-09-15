@@ -36,12 +36,14 @@ def parse_lines(raw_lines: list[dict]) -> list[dict]:
             cantidad    = _parsear_cantidad(line["cantidad"])
             precio      = _parsear_precio(line["precio"])
             fecha       = line["fecha"] if line["fecha"] else fecha_max
+            fecha       = _aplicar_piso_fecha(fecha, line.get("fecha_pedido", ""))
 
             parsed.append({
                 "cod_fabrica":  cod_limpio,
                 "cantidad":     cantidad,
                 "precio_float": precio,
                 "fecha":        fecha,
+                "fecha_pedido": line.get("fecha_pedido", ""),
             })
             logger.debug(f"Línea {i+1} parseada: {cod_limpio} | qty={cantidad} | precio={precio} | fecha={fecha}")
 
@@ -110,6 +112,23 @@ def _parsear_precio(raw: str) -> float:
     except ValueError:
         logger.warning(f"No se pudo parsear precio '{raw}', usando fallback 100.0")
         return 100.0
+
+
+# ── Piso de fecha ──────────────────────────────────────────────────────────────
+
+def _aplicar_piso_fecha(fecha: str, fecha_pedido: str) -> str:
+    """Si la fecha de envío/entrega es anterior a la fecha de pedido, usa la fecha de pedido."""
+    if not fecha or not fecha_pedido:
+        return fecha
+    try:
+        fecha_dt = datetime.strptime(fecha, _DATE_FMT)
+        fecha_pedido_dt = datetime.strptime(fecha_pedido, _DATE_FMT)
+    except ValueError:
+        return fecha
+    if fecha_dt < fecha_pedido_dt:
+        logger.debug(f"Fecha {fecha} anterior a fecha de pedido {fecha_pedido} → se usa fecha de pedido")
+        return fecha_pedido
+    return fecha
 
 
 # ── Fecha máxima ───────────────────────────────────────────────────────────────
