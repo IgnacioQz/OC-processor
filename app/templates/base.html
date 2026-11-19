@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Antilhue{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="{{ url_for('static', filename='img/favicon.ico') }}">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <img src="{{ url_for('static', filename='img/logo1.png') }}" class="topbar-logo" alt="Antilhue">
+      <div class="topbar-sep"></div>
+      <span class="topbar-path">antilhue / <span>{% block breadcrumb %}herramientas{% endblock %}</span></span>
+    </div>
+    <div class="topbar-right">
+      <div class="status-dot" id="estado-global" data-estado="pendiente" role="status" aria-live="polite">verificando…</div>
+      <button class="theme-toggle" id="theme-toggle" title="Cambiar tema" aria-label="Cambiar tema claro/oscuro">☀</button>
+    </div>
+  </header>
+
+  <div class="layout">
+
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-label">Navegación</div>
+
+        <a href="/" class="sidebar-item {% block nav_procesar %}{% endblock %}">
+          <span class="icon">◈</span>
+          <div class="sidebar-content">
+            <span class="sidebar-title">Procesar OC</span>
+            <span class="sidebar-desc">PDF → CSV Softland</span>
+          </div>
+        </a>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Pasos</div>
+
+        <div class="sidebar-item sidebar-item--info">
+          <span class="icon">◉</span>
+          <div class="sidebar-content">
+            <span class="sidebar-title">Extraer PDF</span>
+            <span class="sidebar-desc">Líneas de la OC</span>
+          </div>
+        </div>
+
+        <div class="sidebar-item sidebar-item--info">
+          <span class="icon">◉</span>
+          <div class="sidebar-content">
+            <span class="sidebar-title">Buscar en Odoo</span>
+            <span class="sidebar-desc">Cód. proveedor → interno</span>
+          </div>
+        </div>
+
+        <div class="sidebar-item sidebar-item--info">
+          <span class="icon">◉</span>
+          <div class="sidebar-content">
+            <span class="sidebar-title">Generar CSV</span>
+            <span class="sidebar-desc">Formato Softland</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-divider"></div>
+
+      <div class="sidebar-section">
+        <div class="sidebar-label">Conexiones</div>
+
+        <div class="sidebar-item sidebar-item--info">
+          <span class="icon">◉</span>
+          <div class="sidebar-content">
+            <span class="sidebar-title">Odoo JSON-2</span>
+            <span class="sidebar-desc">{{ odoo_host }}</span>
+          </div>
+          <span class="badge" data-estado-badge="odoo" data-estado="pendiente">…</span>
+        </div>
+      </div>
+
+      <div class="sidebar-meta">
+        <div class="meta-row"><span>versión</span><span class="meta-val">v1.0.0</span></div>
+        <div class="meta-row"><span>entorno</span><span class="meta-val">docker · flask</span></div>
+        <div class="meta-row"><span>destino</span><span class="meta-val">softland · odoo</span></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      {% block body %}{% endblock %}
+    </main>
+  </div>
+
+  <footer class="footer">
+    <div class="footer-left">
+      <span>antilhue.com</span>
+      <div class="footer-sep"></div>
+      <span>softland-bridge v1.0</span>
+    </div>
+    <div class="footer-right">
+      <span>docker · flask</span>
+      <div class="footer-sep"></div>
+      <span id="footer-time">--:--</span>
+    </div>
+  </footer>
+
+  <script>
+    (function () {
+      let saved = null;
+      try { saved = localStorage.getItem('theme'); } catch (e) {}
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if ((saved || (prefersDark ? 'dark' : 'light')) === 'light')
+        document.documentElement.setAttribute('data-theme', 'light');
+    })();
+
+    function syncIcon() {
+      const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+      document.getElementById('theme-toggle').textContent = isLight ? '☾' : '☀';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      syncIcon();
+      document.getElementById('theme-toggle').addEventListener('click', () => {
+        const isLight = document.documentElement.getAttribute('data-theme') === 'light';
+        const next = isLight ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', next);
+        try { localStorage.setItem('theme', next); } catch (e) {}
+        syncIcon();
+      });
+    });
+
+    function tick() {
+      document.getElementById('footer-time').textContent = new Date().toTimeString().slice(0, 5);
+    }
+    tick();
+    setInterval(tick, 10000);
+
+    // ── Estado real de las conexiones (GET /estado) ──
+    const ESTADO_INTERVALO_MS = 30000;
+    const NOMBRES = { odoo: 'odoo' };
+    let estadoAnterior = {};
+
+    function pintarEstado(datos) {
+      const servicios = Object.keys(NOMBRES).filter(s => datos[s]);
+      const caidos = servicios.filter(s => !datos[s].ok);
+
+      const global = document.getElementById('estado-global');
+      global.dataset.estado = caidos.length ? 'error' : 'ok';
+      global.textContent = caidos.length
+        ? caidos.map(s => NOMBRES[s]).join(' · ') + ' sin conexión'
+        : 'en línea';
+      global.title = servicios.map(s => NOMBRES[s] + ': ' + datos[s].detalle + ' (' + datos[s].ms + ' ms)').join('\n');
+
+      servicios.forEach(s => {
+        const d = datos[s];
+        document.querySelectorAll('[data-estado-badge="' + s + '"]').forEach(el => {
+          el.dataset.estado = d.ok ? 'ok' : 'error';
+          el.textContent = d.ok ? 'ok' : 'error';
+          el.title = d.detalle;
+        });
+        document.querySelectorAll('[data-estado-texto="' + s + '"]').forEach(el => {
+          el.dataset.estado = d.ok ? 'ok' : 'error';
+          el.textContent = d.ok ? (el.dataset.textoOk || 'Conectado') : 'Sin conexión';
+        });
+        document.querySelectorAll('[data-estado-detalle="' + s + '"]').forEach(el => {
+          el.textContent = d.host + ' · ' + (d.ok ? d.detalle + ' · ' + d.ms + ' ms' : d.detalle);
+        });
+
+        if (estadoAnterior[s] !== d.ok) {
+          document.dispatchEvent(new CustomEvent('estado-cambio', { detail: Object.assign({ servicio: s, nombre: NOMBRES[s] }, d) }));
+          estadoAnterior[s] = d.ok;
+        }
+      });
+    }
+
+    function pintarSinRespuesta() {
+      const global = document.getElementById('estado-global');
+      global.dataset.estado = 'error';
+      global.textContent = 'servidor sin respuesta';
+      document.querySelectorAll('[data-estado-badge], [data-estado-texto]').forEach(el => {
+        el.dataset.estado = 'pendiente';
+        el.textContent = el.hasAttribute('data-estado-badge') ? '?' : 'Desconocido';
+      });
+    }
+
+    function actualizarEstado() {
+      fetch('/estado', { cache: 'no-store' })
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(pintarEstado)
+        .catch(pintarSinRespuesta);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      actualizarEstado();
+      setInterval(actualizarEstado, ESTADO_INTERVALO_MS);
+    });
+  </script>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

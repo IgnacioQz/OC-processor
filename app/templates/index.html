@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}Procesador OC · Antilhue{% endblock %}
+{% block breadcrumb %}procesar-oc{% endblock %}
+{% block nav_procesar %}active{% endblock %}
+
+{% block body %}
+
+<div class="page-header">
+  <div class="page-eyebrow">antilhue · refrigeración industrial</div>
+  <h1 class="page-title">Procesador <span>OC → CSV</span></h1>
+  <p class="page-sub">Convierte la orden de compra en PDF al formato CSV de Softland, consultando en Odoo los códigos internos de cada producto.</p>
+</div>
+
+<div class="content-grid">
+
+  <!-- PANEL PRINCIPAL -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Nueva orden de compra</span>
+      <span class="panel-tag">PDF → CSV</span>
+    </div>
+    <div class="panel-body">
+
+      <form id="form-oc" novalidate>
+        <div class="form-row">
+          <div class="field">
+            <label for="orden">N° Orden de compra</label>
+            <input type="text" id="orden" name="orden" placeholder="ej: 7118" autocomplete="off" autofocus
+                   maxlength="30" pattern="[A-Za-z0-9_\-]+" required>
+          </div>
+          <div class="field">
+            <label for="tasa">Tasa USD/CLP</label>
+            <input type="number" id="tasa" name="tasa" placeholder="ej: 950.50" step="0.01" min="0.01" required>
+          </div>
+        </div>
+
+        <div class="field" style="margin-top:1rem">
+          <label for="pdf">Archivo PDF</label>
+          <div class="drop" id="zone">
+            <input type="file" id="pdf" name="pdf" accept=".pdf,application/pdf" required>
+            <div class="drop-icon">⬡</div>
+            <div class="drop-label">Arrastra aquí o <span>selecciona un PDF</span></div>
+            <div class="drop-filename" id="fname"></div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-submit" id="btn" style="margin-top:1rem">
+          <span class="btn-icon">▶</span> Generar CSV para Softland
+        </button>
+      </form>
+
+      <div class="status" id="status" role="status" aria-live="polite">
+        <div class="spinner" id="status-spinner" style="display:none"></div>
+        <span class="status-prefix" id="status-prefix"></span>
+        <span id="status-msg"></span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- SIDEBAR DERECHA -->
+  <div class="status-side">
+
+    <div class="status-card">
+      <div class="status-card-title">ÚLTIMO CSV</div>
+      <div class="status-big" id="ultimo-lineas" style="font-size:18px; word-break:break-all;">—</div>
+      <div class="status-small" id="ultimo-detalle">aún no se procesa ninguna OC</div>
+    </div>
+
+    <div class="status-card">
+      <div class="status-card-title">ODOO JSON-2</div>
+      <div class="status-online" data-estado-texto="odoo" data-estado="pendiente" data-texto-ok="Conectado">Verificando…</div>
+      <div class="status-small" data-estado-detalle="odoo">{{ odoo_host }}</div>
+    </div>
+
+  </div>
+
+</div>
+
+<!-- LOG -->
+<div class="log-panel">
+  <div class="log-header">stdout · sesión</div>
+  <div class="log-body" id="log-body">
+    <div class="log-line">
+      <span class="ts">--:--</span>
+      <span class="key">estado</span>
+      <span class="val green">listo</span>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const NO_ENCONTRADO = 'No_Existe_en_ODOO';
+  const RE_ORDEN = /^[A-Za-z0-9_\-]{1,30}$/;
+
+  function agregarLog(clave, texto, clase) {
+    const linea = document.createElement('div');
+    linea.className = 'log-line';
+    const ts = document.createElement('span');
+    ts.className = 'ts';
+    ts.textContent = new Date().toTimeString().slice(0, 5);
+    const key = document.createElement('span');
+    key.className = 'key';
+    key.textContent = clave;
+    const val = document.createElement('span');
+    val.className = 'val ' + (clase || '');
+    val.textContent = texto;
+    linea.append(ts, key, val);
+    const body = document.getElementById('log-body');
+    body.appendChild(linea);
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function setStatus(msg, tipo) {
+    const etiquetas = { loading: 'INFO', error: 'ERROR', success: 'OK' };
+    document.getElementById('status').className = 'status visible ' + tipo;
+    document.getElementById('status-prefix').textContent = etiquetas[tipo] || '';
+    document.getElementById('status-msg').textContent = msg;
+    document.getElementById('status-spinner').style.display = tipo === 'loading' ? 'block' : 'none';
+  }
+
+  // Registrar en el log cada cambio real de estado de las conexiones
+  document.addEventListener('estado-cambio', function (e) {
+    const d = e.detail;
+    agregarLog(d.nombre, d.ok ? 'conectado · ' + d.ms + ' ms' : 'sin conexión · ' + d.detalle, d.ok ? 'green' : 'err');
+  });
+
+  document.addEventListener('DOMContentLoaded', function () {
+    const form = document.getElementById('form-oc');
+    const archivo = document.getElementById('pdf');
+    const orden = document.getElementById('orden');
+
+    orden.addEventListener('input', () => { orden.value = orden.value.toUpperCase(); });
+
+    archivo.addEventListener('change', () => {
+      const nombre = archivo.files[0] ? archivo.files[0].name : '';
+      document.getElementById('fname').textContent = nombre;
+      document.getElementById('zone').classList.toggle('active', !!nombre);
+      if (nombre) agregarLog('archivo', nombre);
+    });
+
+    form.addEventListener('submit', async function (e) {
+      e.preventDefault();
+
+      const vOrden = orden.value.trim();
+      const vTasa = document.getElementById('tasa').value.trim();
+      const pdf = archivo.files[0];
+
+      if (!vOrden || !vTasa || !pdf) {
+        setStatus('Completa todos los campos antes de continuar.', 'error');
+        agregarLog('validación', 'campos incompletos', 'warn');
+        return;
+      }
+      if (!RE_ORDEN.test(vOrden)) {
+        setStatus("El N° de orden solo puede tener letras, números, '-' o '_' (máx. 30).", 'error');
+        agregarLog('validación', 'n° de orden inválido', 'warn');
+        return;
+      }
+
+      const btn = document.getElementById('btn');
+      btn.disabled = true;
+      setStatus('Procesando PDF y consultando Odoo…', 'loading');
+      agregarLog('oc', vOrden + ' · tasa ' + vTasa + ' USD/CLP');
+
+      const fd = new FormData();
+      fd.append('orden', vOrden);
+      fd.append('tasa', vTasa);
+      fd.append('pdf', pdf);
+
+      try {
+        const resp = await fetch('/procesar-oc', { method: 'POST', body: fd });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({
+            error: 'Respuesta inesperada del servidor (HTTP ' + resp.status + ')'
+          }));
+          setStatus(err.error || 'Error desconocido', 'error');
+          agregarLog('error', err.error || 'desconocido', 'err');
+          return;
+        }
+
+        const blob = await resp.blob();
+        const texto = await blob.text();
+        const filas = texto.split('\n').slice(1).filter(Boolean);
+        const faltantes = filas.filter(f => f.includes(NO_ENCONTRADO)).length;
+
+        const nombreCsv = 'OC_' + vOrden + '_softland.csv';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = nombreCsv;
+        a.click();
+        URL.revokeObjectURL(a.href);
+
+        document.getElementById('ultimo-lineas').textContent = 'OC ' + vOrden + ' · ' + filas.length + ' líneas';
+        document.getElementById('ultimo-detalle').textContent = faltantes
+          ? faltantes + ' sin código en Odoo (' + NO_ENCONTRADO + ')'
+          : 'todos los códigos encontrados en Odoo';
+
+        if (faltantes) {
+          setStatus('CSV generado — ' + faltantes + ' de ' + filas.length + ' líneas sin código en Odoo. Revísalas antes de importar.', 'error');
+          agregarLog('output', nombreCsv + ' · ' + faltantes + ' sin código Odoo', 'warn');
+        } else {
+          setStatus('CSV generado correctamente — OC ' + vOrden + ' · ' + filas.length + ' líneas', 'success');
+          agregarLog('output', nombreCsv + ' · ' + filas.length + ' líneas', 'green');
+        }
+      } catch (err) {
+        setStatus('Error de red: ' + err.message, 'error');
+        agregarLog('error', err.message, 'err');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+</script>
+{% endblock %}

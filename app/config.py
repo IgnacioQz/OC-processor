@@ -14,8 +14,7 @@ load_dotenv()
 _REQUERIDAS = (
     "ODOO_URL",
     "ODOO_DB",
-    "ODOO_USER",
-    "ODOO_PASSWORD",
+    "ODOO_API_KEY",
     "SOFTLAND_RUT_PROVEEDOR",
     "SOFTLAND_TIPO_DOC",
     "SOFTLAND_COD_BODEGA",
@@ -58,11 +57,10 @@ _validar_entorno()
 
 
 class Config:
-    # ── Odoo ──────────────────────────────────────────────────────────────────
-    ODOO_URL      = _env("ODOO_URL").rstrip("/")
-    ODOO_DB       = _env("ODOO_DB")
-    ODOO_USER     = _env("ODOO_USER")
-    ODOO_PASSWORD = _env("ODOO_PASSWORD")
+    # ── Odoo (API JSON-2, autenticación por API key) ──────────────────────────
+    ODOO_URL     = _env("ODOO_URL").rstrip("/")
+    ODOO_DB      = _env("ODOO_DB")
+    ODOO_API_KEY = _env("ODOO_API_KEY")
 
     # ── Softland — campos fijos del CSV ───────────────────────────────────────
     SOFTLAND_RUT_PROVEEDOR = _env("SOFTLAND_RUT_PROVEEDOR")
