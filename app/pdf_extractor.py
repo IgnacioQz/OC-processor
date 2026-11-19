@@ -2,11 +2,12 @@
 Capa 1 — Extracción de líneas crudas del PDF.
 
 Estrategia:
-- Usamos pdfplumber con extracción de tablas (table_settings ajustados).
-- Una fila válida es aquella cuya primera celda contiene el número de línea
-  (múltiplo de 10: 10, 20, 30 ...) y la segunda el código de fabricante.
-- Las filas de continuación (descripción multilínea) se ignoran ya que
-  la descripción no se utiliza en el CSV de Softland.
+- Se extrae el texto completo del PDF con pdfplumber y se detecta el formato:
+    * "registro de pedido" (formato heredado): todo en una línea por producto.
+    * "confirm. pedido" (confirmación Danfoss): línea de producto + bloque de
+      detalle con la fecha de envío en las líneas siguientes.
+- Una línea de producto empieza con el número de línea (10, 20, 30 ...).
+- La descripción no se utiliza en el CSV de Softland, por lo que se ignora.
 """
 import re
 import pdfplumber
@@ -14,15 +15,6 @@ import io
 import logging
 
 logger = logging.getLogger(__name__)
-
-# Patrón: número de línea al inicio de fila (10, 20, 30 ...)
-_RE_LINE_NUM = re.compile(r"^\d+$")
-
-# Patrón básico para códigos de fabricante (alfanumérico con guiones/puntos/+)
-_RE_CODIGO = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-\+\.]{2,}$")
-
-# Patrón precio: opcional "$", espacios, dígitos con puntos/comas
-_RE_PRECIO = re.compile(r"^\$?\s*[\d.,]+$")
 
 # Formato nuevo (confirmación de pedido Danfoss): "10 1 pc 2512+059 1.098,26 1.098,26"
 _RE_LINE_NEW = re.compile(
@@ -152,55 +144,3 @@ def _extract_formato_nuevo(full_text: str) -> list[dict]:
         )
 
     return raw_rows
-
-def _parse_row(row: list) -> dict | None:
-    """
-    Evalúa una fila cruda de la tabla y retorna dict si es una línea de producto.
-    El PDF del proveedor (Danfoss) tiene esta estructura de columnas:
-        [0] N° línea (10/20/30...)
-        [1] Código fabricante
-        [2] Descripción         ← ignorada
-        [3] Cantidad
-        [4] Unidad              ← ignorada
-        [5] Fecha envío estimada
-        [6] Precio neto unitario
-        [7] Precio total        ← ignorado
-    """
-    if not row or len(row) < 6:
-        return None
-
-    # Limpiar celdas None → ""
-    cells = [str(c).strip() if c else "" for c in row]
-
-    col0 = cells[0]  # N° línea
-    col1 = cells[1]  # Código fabricante
-    col3 = cells[3]  # Cantidad
-    col5 = cells[5]  # Fecha estimada
-    col6 = cells[6] if len(cells) > 6 else ""  # Precio unitario
-
-    # Filtro: la primera celda debe ser número de línea (10, 20, 30 ...)
-    if not _RE_LINE_NUM.match(col0):
-        return None
-
-    # Filtro: segunda celda debe parecerse a un código de fabricante
-    if not _RE_CODIGO.match(col1):
-        return None
-
-    # Extraer fecha (DD/MM/YYYY)
-    fecha = _extract_fecha(col5)
-
-    # El precio puede estar en col6 (normal) o col5 si hay corrimiento
-    precio = col6 if _RE_PRECIO.match(col6) else (col5 if _RE_PRECIO.match(col5) else "")
-
-    return {
-        "cod_fabrica": col1,
-        "cantidad":    col3,
-        "fecha":       fecha,
-        "precio":      precio,
-    }
-
-
-def _extract_fecha(valor: str) -> str:
-    """Extrae fecha en formato DD/MM/YYYY. Retorna '' si no encuentra."""
-    match = re.search(r"\d{2}/\d{2}/\d{4}", valor)
-    return match.group(0) if match else ""

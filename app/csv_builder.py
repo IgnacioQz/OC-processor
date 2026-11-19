@@ -6,6 +6,7 @@ Header: se usa exactamente el string original que Softland acepta,
         No modificar — cualquier cambio puede romper la importación.
 """
 import logging
+import re
 from datetime import datetime
 from config import Config
 from odoo_service import NOT_FOUND_CODE
@@ -13,6 +14,9 @@ from odoo_service import NOT_FOUND_CODE
 logger = logging.getLogger(__name__)
 
 _DATE_FMT = "%d/%m/%Y"
+
+# Caracteres que romperían la estructura del CSV si aparecen en un campo
+_RE_CARACTER_INVALIDO = re.compile(r'[,;"\r\n]')
 
 # Header original tal cual lo requiere Softland — NO modificar
 SOFTLAND_HEADER = (
@@ -61,7 +65,16 @@ def build_csv(
     for line in parsed_lines:
         cod_fabrica   = line["cod_fabrica"]
         default_code  = mapeo_odoo.get(cod_fabrica, NOT_FOUND_CODE)
-        default_code  = _limpiar_codigo_interno(default_code)
+        default_code  = _limpiar_codigo_interno(default_code.strip())
+
+        # El CSV se arma por concatenación (Softland no acepta comillas), así
+        # que un código con coma, comilla o salto de línea correría las columnas.
+        if _RE_CARACTER_INVALIDO.search(default_code):
+            logger.error(
+                f"Línea OC {orden} | {cod_fabrica} → código Odoo {default_code!r} "
+                f"contiene caracteres no permitidos en el CSV; se marca como {NOT_FOUND_CODE}"
+            )
+            default_code = NOT_FOUND_CODE
         cantidad      = line["cantidad"]
         precio_usd    = line["precio_float"]
         fecha_entrega = line["fecha"]
@@ -89,9 +102,6 @@ def build_csv(
             equi=equi,
         )
         lineas_csv.append(fila)
-
-    if len(lineas_csv) <= 1:
-        return "No existe Orden"
 
     logger.info(f"CSV generado: {len(lineas_csv) - 1} líneas de producto")
     return "\n".join(lineas_csv)

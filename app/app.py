@@ -3,7 +3,8 @@ Microservicio Flask - Procesador de Órdenes de Compra
 Convierte PDF de OC → CSV compatible con Softland
 """
 import io
-import logging
+import math
+import re
 from flask import Flask, request, jsonify, send_file, render_template_string
 from pdf_extractor import extract_order_lines
 from order_parser import parse_lines
@@ -14,6 +15,10 @@ from config import Config
 
 app = Flask(__name__)
 logger = setup_logger(__name__)
+
+# N° de orden: va tal cual al CSV y al nombre del archivo, por lo que solo se
+# aceptan caracteres que no rompan columnas (sin comas, comillas ni espacios).
+_RE_ORDEN = re.compile(r"^[A-Za-z0-9_\-]{1,30}$")
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -328,6 +333,10 @@ def procesar_oc():
 
     if not orden:
         return jsonify({"error": "El campo 'orden' es requerido"}), 400
+    if not _RE_ORDEN.match(orden):
+        return jsonify({
+            "error": "El número de orden solo puede contener letras, números, '-' o '_' (máx. 30)"
+        }), 400
     if not tasa_raw:
         return jsonify({"error": "El campo 'tasa' es requerido"}), 400
     if not pdf_file or pdf_file.filename == "":
@@ -335,7 +344,7 @@ def procesar_oc():
 
     try:
         equi = float(tasa_raw)
-        if equi <= 0:
+        if not math.isfinite(equi) or equi <= 0:
             raise ValueError()
     except ValueError:
         return jsonify({"error": "La tasa de cambio debe ser un número positivo"}), 400

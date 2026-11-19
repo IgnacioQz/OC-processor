@@ -1,5 +1,5 @@
 """
-Capa 6 — Logger estructurado.
+Logger estructurado.
 
 Configura logging con formato consistente para trazabilidad.
 Cada OC procesada queda registrada con: códigos encontrados,
@@ -7,41 +7,48 @@ faltantes en Odoo, tiempos y errores.
 """
 import logging
 import sys
-from odoo_service import NOT_FOUND_CODE
+
+# Librerías de terceros muy verbosas en DEBUG (pdfminer loguea cada objeto del PDF)
+_LIBRERIAS_RUIDOSAS = ("pdfminer", "pdfplumber", "PIL")
 
 
 def setup_logger(name: str) -> logging.Logger:
     """
-    Configura y retorna un logger con salida a stdout y archivo.
+    Configura el logger raíz (stdout + archivo) para que TODOS los módulos
+    (pdf_extractor, order_parser, odoo_service, csv_builder...) hereden los
+    handlers, y retorna el logger con el nombre pedido.
     """
-    logger = logging.getLogger(name)
+    root = logging.getLogger()
 
-    if logger.handlers:
-        return logger  # Ya configurado
+    if not getattr(root, "_oc_configurado", False):
+        root.setLevel(logging.DEBUG)
 
-    logger.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
 
-    formatter = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+        # Handler stdout
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setLevel(logging.INFO)
+        stdout_handler.setFormatter(formatter)
+        root.addHandler(stdout_handler)
 
-    # Handler stdout
-    stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setLevel(logging.INFO)
-    stdout_handler.setFormatter(formatter)
+        # Handler archivo
+        try:
+            file_handler = logging.FileHandler("oc_processor.log", encoding="utf-8")
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(formatter)
+            root.addHandler(file_handler)
+        except Exception:
+            pass  # En entornos sin permisos de escritura, solo stdout
 
-    # Handler archivo (rotativo simple)
-    try:
-        file_handler = logging.FileHandler("oc_processor.log", encoding="utf-8")
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-    except Exception:
-        pass  # En entornos sin permisos de escritura, solo stdout
+        for nombre in _LIBRERIAS_RUIDOSAS:
+            logging.getLogger(nombre).setLevel(logging.WARNING)
 
-    logger.addHandler(stdout_handler)
-    return logger
+        root._oc_configurado = True
+
+    return logging.getLogger(name)
 
 
 def log_processing_summary(
